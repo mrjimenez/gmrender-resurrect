@@ -63,6 +63,8 @@ struct upnp_device {
 int upnp_add_response(struct action_event *event,
 		      const char *key, const char *value)
 {
+	IXML_Document *action_result;
+
 	assert(event != NULL);
 	assert(key != NULL);
 	assert(value != NULL);
@@ -72,14 +74,18 @@ int upnp_add_response(struct action_event *event,
 	}
 
 	int rc;
-	rc = UpnpAddToActionResponse(&event->request->ActionResult,
-				     event->request->ActionName,
+
+	action_result = UpnpActionRequest_get_ActionResult(event->request);
+	rc = UpnpAddToActionResponse(&action_result,
+				     UpnpActionRequest_get_ActionName_cstr(event->request),
 				     event->service->service_type, key, value);
 	if (rc != UPNP_E_SUCCESS) {
 		/* report custom error */
+#ifdef LAYERVIOLATION
 		event->request->ActionResult = NULL;
 		event->request->ErrCode = UPNP_SOAP_E_ACTION_FAILED;
 		strcpy(event->request->ErrStr, UpnpGetErrorMessage(rc));
+#endif
 		return -1;
 	}
 	return 0;
@@ -110,20 +116,22 @@ void upnp_set_error(struct action_event *event, int error_code,
 
 	va_list ap;
 	va_start(ap, format);
+#ifdef LAYERVIOLATION
 	event->request->ActionResult = NULL;
 	event->request->ErrCode = UPNP_SOAP_E_ACTION_FAILED;
 	vsnprintf(event->request->ErrStr, sizeof(event->request->ErrStr),
 		  format, ap);
+#endif
 
 	va_end(ap);
-	Log_error("upnp", "%s: %s\n", __FUNCTION__, event->request->ErrStr);
+	Log_error("upnp", "%s: %s\n", __FUNCTION__, UpnpActionRequest_get_ErrStr_cstr(event->request));
 }
 
 const char *upnp_get_string(struct action_event *event, const char *key)
 {
 	IXML_Node *node;
 
-	node = (IXML_Node *) event->request->ActionRequest;
+	node = (IXML_Node *) UpnpActionRequest_get_ActionRequest(event->request);
 	if (node == NULL) {
 		upnp_set_error(event, UPNP_SOAP_E_INVALID_ARGS,
 			       "Invalid action request document");
@@ -153,8 +161,7 @@ const char *upnp_get_string(struct action_event *event, const char *key)
 }
 
 static int handle_subscription_request(struct upnp_device *priv,
-                                       struct Upnp_Subscription_Request
-                                              *sr_event)
+                                       UpnpSubscriptionRequest *sr_event)
 {
 	struct service *srv;
 	int rc;
@@ -162,12 +169,14 @@ static int handle_subscription_request(struct upnp_device *priv,
 	assert(priv != NULL);
 
 	Log_info("upnp", "Subscription request for %s (%s)",
-		 sr_event->ServiceId, sr_event->UDN);
+		 UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event),
+		 UpnpSubscriptionRequest_get_UDN_cstr(sr_event));
 
-	srv = find_service(priv->upnp_device_descriptor, sr_event->ServiceId);
+	srv = find_service(priv->upnp_device_descriptor,
+			   UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event));
 	if (srv == NULL) {
 		Log_error("upnp", "%s: Unknown service '%s'", __FUNCTION__,
-			  sr_event->ServiceId);
+			  UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event));
 		return -1;
 	}
 
@@ -209,9 +218,10 @@ static int handle_subscription_request(struct upnp_device *priv,
 	UPnPLastChangeBuilder_delete(builder);
 
 	rc = UpnpAcceptSubscription(priv->device_handle,
-				    sr_event->UDN, sr_event->ServiceId,
+				    UpnpSubscriptionRequest_get_UDN_cstr(sr_event),
+				    UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event),
 				    eventvar_names, eventvar_values, 1,
-				    sr_event->Sid);
+				    UpnpSubscriptionRequest_get_SID_cstr(sr_event));
 	if (rc == UPNP_E_SUCCESS) {
 		result = 0;
 	} else {
@@ -240,11 +250,13 @@ int upnp_device_notify(struct upnp_device *device,
 
 
 static int handle_var_request(struct upnp_device *priv,
-			      struct Upnp_State_Var_Request *var_event) {
+			      UpnpStateVarRequest *var_event) {
 	struct service *srv = find_service(priv->upnp_device_descriptor,
-					   var_event->ServiceID);
+					   UpnpStateVarRequest_get_ServiceID_cstr(var_event));
 	if (srv == NULL) {
+#ifdef LAYERVIOLATION
 		var_event->ErrCode = UPNP_SOAP_E_INVALID_ARGS;
+#endif
 		return -1;
 	}
 
@@ -257,7 +269,7 @@ static int handle_var_request(struct upnp_device *priv,
 		const char *name;
 		const char *value =
 			VariableContainer_get(srv->variable_container, i, &name);
-		if (value && strcmp(var_event->StateVarName, name) == 0) {
+		if (value && strcmp(UpnpStateVarRequest_get_StateVarName_cstr(var_event), name) == 0) {
 			result = strdup(value);
 			break;
 		}
@@ -265,30 +277,36 @@ static int handle_var_request(struct upnp_device *priv,
 
 	ithread_mutex_unlock(srv->service_mutex);
 
+#ifdef LAYERVIOLATION
 	var_event->CurrentVal = result;
 	var_event->ErrCode = (result == NULL)
 		? UPNP_SOAP_E_INVALID_VAR
 		: UPNP_E_SUCCESS;
+#endif
 	Log_info("upnp", "Variable request %s -> %s (%s)",
-		 var_event->StateVarName, result, var_event->ServiceID);
+		 UpnpStateVarRequest_get_StateVarName_cstr(var_event), result,
+		 UpnpStateVarRequest_get_ServiceID_cstr(var_event));
 	return 0;
 }
 
 static int handle_action_request(struct upnp_device *priv,
-                                 struct Upnp_Action_Request *ar_event)
+                                 UpnpActionRequest *ar_event)
 {
 	struct service *event_service;
 	struct action *event_action;
 
 	event_service = find_service(priv->upnp_device_descriptor,
-				     ar_event->ServiceID);
-	event_action = find_action(event_service, ar_event->ActionName);
+				     UpnpActionRequest_get_ServiceID_cstr(ar_event));
+	event_action = find_action(event_service, UpnpActionRequest_get_ActionName_cstr(ar_event));
 
 	if (event_action == NULL) {
 		Log_error("upnp", "Unknown action '%s' for service '%s'",
-			  ar_event->ActionName, ar_event->ServiceID);
+			  UpnpActionRequest_get_ActionName_cstr(ar_event),
+			  UpnpActionRequest_get_ServiceID_cstr(ar_event));
+#ifdef LAYERVIOLATION
 		ar_event->ActionResult = NULL;
 		ar_event->ErrCode = 401;
+#endif
 		return -1;
 	}
 
@@ -335,7 +353,9 @@ static int handle_action_request(struct upnp_device *priv,
 
 		rc = (event_action->callback) (&event);
 		if (rc == 0) {
+#ifdef LAYERVIOLATION
 			ar_event->ErrCode = UPNP_E_SUCCESS;
+#endif
 #ifdef ENABLE_ACTION_LOGGING
 			if (ar_event->ActionResult) {
 				char *action_result_xml = NULL;
@@ -351,11 +371,12 @@ static int handle_action_request(struct upnp_device *priv,
 			}
 #endif
 		}
-		if (ar_event->ActionResult == NULL) {
-			ar_event->ActionResult =
-			    UpnpMakeActionResponse(ar_event->ActionName,
+		if (UpnpActionRequest_get_ActionResult(ar_event) == NULL) {
+			/* layer violation? */
+			UpnpActionRequest_set_ActionResult(ar_event,
+			    UpnpMakeActionResponse(UpnpActionRequest_get_ActionName_cstr(ar_event),
 						   event_service->service_type,
-						   0, NULL);
+						   0, NULL));
 		}
 	} else {
 		Log_error("upnp",
@@ -366,10 +387,15 @@ static int handle_action_request(struct upnp_device *priv,
 			  "  ActionName: '%s'\n"
 			  "  DevUDN:     '%s'\n"
 			  "  ServiceID:  '%s'\n",
-			  ar_event->ErrCode, ar_event->Socket, ar_event->ErrStr,
-			  ar_event->ActionName, ar_event->DevUDN,
-			  ar_event->ServiceID);
+			  UpnpActionRequest_get_ErrCode(ar_event),
+			  UpnpActionRequest_get_Socket(ar_event),
+			  UpnpActionRequest_get_ErrStr_cstr(ar_event),
+			  UpnpActionRequest_get_ActionName_cstr(ar_event),
+			  UpnpActionRequest_get_DevUDN_cstr(ar_event),
+			  UpnpActionRequest_get_ServiceID_cstr(ar_event));
+#ifdef LAYERVIOLATION
 		ar_event->ErrCode = UPNP_E_SUCCESS;
+#endif
 	}
 
 	if (event_service->last_change) {   // See comment above.
@@ -430,7 +456,9 @@ static gboolean initialize_device(struct upnp_device_descriptor *device_def,
 	if (!webserver_register_callbacks())
 	  return FALSE;
 
-	rc = UpnpAddVirtualDir("/upnp");
+	rc = UpnpAddVirtualDir("/upnp"
+			      , NULL, NULL
+			       );
 	if (UPNP_E_SUCCESS != rc) {
 		Log_error("upnp", "UpnpAddVirtualDir() Error: %s (%d)",
 			  UpnpGetErrorMessage(rc), rc);

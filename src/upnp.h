@@ -24,6 +24,8 @@
 #ifndef _UPNP_H
 #define _UPNP_H
 
+#include <upnp/upnp.h>
+
 struct action;
 struct service;
 struct action_event;
@@ -106,15 +108,19 @@ struct service {
 };
 
 struct action_event {
-	struct Upnp_Action_Request *request;
+	UpnpActionRequest *request;
 	int status;
 	struct service *service;
 	struct upnp_device *device;
 };
 
 struct action *find_action(struct service *event_service,
-                                  char *action_name);
+                           const char *action_name);
 
 char *upnp_get_scpd(struct service *srv);
+
+#if UPNP_VERSION >= 10803
+#define UpnpAddVirtualDir(a) UpnpAddVirtualDir((a), NULL, NULL)
+#endif
 
 #endif /* _UPNP_H */
