@@ -57,14 +57,12 @@
 struct upnp_device {
 	struct upnp_device_descriptor *upnp_device_descriptor;
 	ithread_mutex_t device_mutex;
-        UpnpDevice_Handle device_handle;
+	UpnpDevice_Handle device_handle;
 };
 
 int upnp_add_response(struct action_event *event,
 		      const char *key, const char *value)
 {
-	IXML_Document *action_result;
-
 	assert(event != NULL);
 	assert(key != NULL);
 	assert(value != NULL);
@@ -73,26 +71,27 @@ int upnp_add_response(struct action_event *event,
 		return -1;
 	}
 
+	IXML_Document *actionResult =
+		UpnpActionRequest_get_ActionResult(event->request);
+	const char *actionName =
+		UpnpActionRequest_get_ActionName_cstr(event->request);
 	int rc;
-
-	action_result = UpnpActionRequest_get_ActionResult(event->request);
-	rc = UpnpAddToActionResponse(&action_result,
-				     UpnpActionRequest_get_ActionName_cstr(event->request),
+	rc = UpnpAddToActionResponse(&actionResult, actionName,
 				     event->service->service_type, key, value);
 	if (rc != UPNP_E_SUCCESS) {
 		/* report custom error */
-#ifdef LAYERVIOLATION
-		event->request->ActionResult = NULL;
-		event->request->ErrCode = UPNP_SOAP_E_ACTION_FAILED;
-		strcpy(event->request->ErrStr, UpnpGetErrorMessage(rc));
-#endif
+		UpnpString *errorMessage = UpnpString_new();
+		UpnpString_set_String(errorMessage, UpnpGetErrorMessage(rc));
+		UpnpActionRequest_set_ActionResult(event->request, NULL);
+		UpnpActionRequest_set_ErrCode(event->request, UPNP_SOAP_E_ACTION_FAILED);
+		UpnpActionRequest_set_ErrStr(event->request, errorMessage);
 		return -1;
 	}
 	return 0;
 }
 
 void upnp_append_variable(struct action_event *event,
-                          int varnum, const char *paramname)
+			  int varnum, const char *paramname)
 {
 	const char *value;
 	struct service *service = event->service;
@@ -112,26 +111,28 @@ void upnp_append_variable(struct action_event *event,
 void upnp_set_error(struct action_event *event, int error_code,
 		    const char *format, ...)
 {
+	static char buffer[80];
+	UpnpString *errStr = UpnpString_new();
+	const char *errStrC;
 	event->status = -1;
 
 	va_list ap;
 	va_start(ap, format);
-#ifdef LAYERVIOLATION
-	event->request->ActionResult = NULL;
-	event->request->ErrCode = UPNP_SOAP_E_ACTION_FAILED;
-	vsnprintf(event->request->ErrStr, sizeof(event->request->ErrStr),
-		  format, ap);
-#endif
-
+	vsnprintf(buffer, sizeof buffer, format, ap);
 	va_end(ap);
-	Log_error("upnp", "%s: %s\n", __FUNCTION__, UpnpActionRequest_get_ErrStr_cstr(event->request));
+	UpnpActionRequest_set_ActionResult(event->request, NULL);
+	UpnpActionRequest_set_ErrCode(event->request, UPNP_SOAP_E_ACTION_FAILED);
+	UpnpString_set_String(errStr, buffer);
+	UpnpActionRequest_set_ErrStr(event->request, errStr);
+	errStrC = UpnpActionRequest_get_ErrStr_cstr(event->request);
+	Log_error("upnp", "%s: %s\n", __FUNCTION__, errStrC);
 }
 
 const char *upnp_get_string(struct action_event *event, const char *key)
 {
 	IXML_Node *node;
 
-	node = (IXML_Node *) UpnpActionRequest_get_ActionRequest(event->request);
+	node = (IXML_Node *)UpnpActionRequest_get_ActionRequest(event->request);
 	if (node == NULL) {
 		upnp_set_error(event, UPNP_SOAP_E_INVALID_ARGS,
 			       "Invalid action request document");
@@ -160,23 +161,22 @@ const char *upnp_get_string(struct action_event *event, const char *key)
 	return NULL;
 }
 
-static int handle_subscription_request(struct upnp_device *priv,
-                                       UpnpSubscriptionRequest *sr_event)
+static int handle_subscription_request(struct upnp_device *priv, void *event)
 {
 	struct service *srv;
 	int rc;
 
 	assert(priv != NULL);
 
-	Log_info("upnp", "Subscription request for %s (%s)",
-		 UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event),
-		 UpnpSubscriptionRequest_get_UDN_cstr(sr_event));
-
-	srv = find_service(priv->upnp_device_descriptor,
-			   UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event));
+	UpnpSubscriptionRequest *sr_event = event;
+	const char *serviceId =
+		UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event);
+	const char *udn = UpnpSubscriptionRequest_get_UDN_cstr(sr_event);
+	Log_info("upnp", "Subscription request for %s (%s)", serviceId, udn);
+	srv = find_service(priv->upnp_device_descriptor, serviceId);
 	if (srv == NULL) {
 		Log_error("upnp", "%s: Unknown service '%s'", __FUNCTION__,
-			  UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event));
+			serviceId);
 		return -1;
 	}
 
@@ -217,11 +217,10 @@ static int handle_subscription_request(struct upnp_device *priv,
 	free(xml_value);
 	UPnPLastChangeBuilder_delete(builder);
 
+	const char *sid = UpnpSubscriptionRequest_get_SID_cstr(sr_event);
 	rc = UpnpAcceptSubscription(priv->device_handle,
-				    UpnpSubscriptionRequest_get_UDN_cstr(sr_event),
-				    UpnpSubscriptionRequest_get_ServiceId_cstr(sr_event),
-				    eventvar_names, eventvar_values, 1,
-				    UpnpSubscriptionRequest_get_SID_cstr(sr_event));
+				    udn, serviceId,
+				    eventvar_names, eventvar_values, 1, sid);
 	if (rc == UPNP_E_SUCCESS) {
 		result = 0;
 	} else {
@@ -237,26 +236,26 @@ static int handle_subscription_request(struct upnp_device *priv,
 }
 
 int upnp_device_notify(struct upnp_device *device,
-                       const char *serviceID,
-                       const char **varnames,
-                       const char **varvalues, int varcount)
+		       const char *serviceID,
+		       const char **varnames,
+		       const char **varvalues, int varcount)
 {
-        UpnpNotify(device->device_handle,
-                   device->upnp_device_descriptor->udn, serviceID,
+	UpnpNotify(device->device_handle,
+		   device->upnp_device_descriptor->udn, serviceID,
 		   varnames, varvalues, varcount);
 
 	return 0;
 }
 
 
-static int handle_var_request(struct upnp_device *priv,
-			      UpnpStateVarRequest *var_event) {
-	struct service *srv = find_service(priv->upnp_device_descriptor,
-					   UpnpStateVarRequest_get_ServiceID_cstr(var_event));
+static int handle_var_request(struct upnp_device *priv, void *event)
+{
+	UpnpStateVarRequest *var_event = event;
+	const char *serviceID = UpnpStateVarRequest_get_ServiceID_cstr(var_event);
+
+	struct service *srv = find_service(priv->upnp_device_descriptor, serviceID);
 	if (srv == NULL) {
-#ifdef LAYERVIOLATION
-		var_event->ErrCode = UPNP_SOAP_E_INVALID_ARGS;
-#endif
+		UpnpStateVarRequest_set_ErrCode(var_event, UPNP_SOAP_E_INVALID_ARGS);
 		return -1;
 	}
 
@@ -269,7 +268,9 @@ static int handle_var_request(struct upnp_device *priv,
 		const char *name;
 		const char *value =
 			VariableContainer_get(srv->variable_container, i, &name);
-		if (value && strcmp(UpnpStateVarRequest_get_StateVarName_cstr(var_event), name) == 0) {
+		const char *stateVarName =
+			UpnpStateVarRequest_get_StateVarName_cstr(var_event);
+		if (value && strcmp(stateVarName, name) == 0) {
 			result = strdup(value);
 			break;
 		}
@@ -277,36 +278,34 @@ static int handle_var_request(struct upnp_device *priv,
 
 	ithread_mutex_unlock(srv->service_mutex);
 
-#ifdef LAYERVIOLATION
-	var_event->CurrentVal = result;
-	var_event->ErrCode = (result == NULL)
+	UpnpStateVarRequest_set_CurrentVal(var_event, result);
+	int errCode = (result == NULL)
 		? UPNP_SOAP_E_INVALID_VAR
 		: UPNP_E_SUCCESS;
-#endif
+	UpnpStateVarRequest_set_ErrCode(var_event, errCode);
+	const char *stateVarName =
+		UpnpStateVarRequest_get_StateVarName_cstr(var_event);
 	Log_info("upnp", "Variable request %s -> %s (%s)",
-		 UpnpStateVarRequest_get_StateVarName_cstr(var_event), result,
-		 UpnpStateVarRequest_get_ServiceID_cstr(var_event));
+		stateVarName, result, serviceID);
 	return 0;
 }
 
-static int handle_action_request(struct upnp_device *priv,
-                                 UpnpActionRequest *ar_event)
+static int handle_action_request(struct upnp_device *priv, void *event)
 {
 	struct service *event_service;
 	struct action *event_action;
 
-	event_service = find_service(priv->upnp_device_descriptor,
-				     UpnpActionRequest_get_ServiceID_cstr(ar_event));
-	event_action = find_action(event_service, UpnpActionRequest_get_ActionName_cstr(ar_event));
+	UpnpActionRequest *ar_event = (UpnpActionRequest *)event;
+	const char *serviceID = UpnpActionRequest_get_ServiceID_cstr(ar_event);
+	const char *actionName = UpnpActionRequest_get_ActionName_cstr(ar_event);
 
+	event_service = find_service(priv->upnp_device_descriptor, serviceID);
+	event_action = find_action(event_service, actionName);
 	if (event_action == NULL) {
 		Log_error("upnp", "Unknown action '%s' for service '%s'",
-			  UpnpActionRequest_get_ActionName_cstr(ar_event),
-			  UpnpActionRequest_get_ServiceID_cstr(ar_event));
-#ifdef LAYERVIOLATION
-		ar_event->ActionResult = NULL;
-		ar_event->ErrCode = 401;
-#endif
+			  actionName, serviceID);
+		UpnpActionRequest_set_ActionResult(ar_event, NULL);
+		UpnpActionRequest_set_ErrCode(ar_event, 401);
 		return -1;
 	}
 
@@ -349,13 +348,11 @@ static int handle_action_request(struct upnp_device *priv,
 		event.request = ar_event;
 		event.status = 0;
 		event.service = event_service;
-                event.device = priv;
+		event.device = priv;
 
 		rc = (event_action->callback) (&event);
 		if (rc == 0) {
-#ifdef LAYERVIOLATION
-			ar_event->ErrCode = UPNP_E_SUCCESS;
-#endif
+			UpnpActionRequest_set_ErrCode(ar_event, UPNP_E_SUCCESS);
 #ifdef ENABLE_ACTION_LOGGING
 			if (ar_event->ActionResult) {
 				char *action_result_xml = NULL;
@@ -371,14 +368,22 @@ static int handle_action_request(struct upnp_device *priv,
 			}
 #endif
 		}
-		if (UpnpActionRequest_get_ActionResult(ar_event) == NULL) {
-			/* layer violation? */
-			UpnpActionRequest_set_ActionResult(ar_event,
-			    UpnpMakeActionResponse(UpnpActionRequest_get_ActionName_cstr(ar_event),
+		IXML_Document *actionResult =
+			UpnpActionRequest_get_ActionResult(ar_event);
+		if (actionResult == NULL) {
+			actionResult =
+			    UpnpMakeActionResponse(actionName,
 						   event_service->service_type,
-						   0, NULL));
+						   0, NULL);
+			UpnpActionRequest_set_ActionResult(ar_event, actionResult);
 		}
 	} else {
+		int errCode = UpnpActionRequest_get_ErrCode(ar_event);
+		int sock = UpnpActionRequest_get_Socket(ar_event);
+		const char *errStr = UpnpActionRequest_get_ErrStr_cstr(ar_event);
+		const char *actionName = UpnpActionRequest_get_ActionName_cstr(ar_event);
+		const char *devUDN = UpnpActionRequest_get_DevUDN_cstr(ar_event);
+		const char *serviceID = UpnpActionRequest_get_ServiceID_cstr(ar_event);
 		Log_error("upnp",
 			  "Got a valid action, but no handler defined (!)\n"
 			  "  ErrCode:    %d\n"
@@ -387,15 +392,8 @@ static int handle_action_request(struct upnp_device *priv,
 			  "  ActionName: '%s'\n"
 			  "  DevUDN:     '%s'\n"
 			  "  ServiceID:  '%s'\n",
-			  UpnpActionRequest_get_ErrCode(ar_event),
-			  UpnpActionRequest_get_Socket(ar_event),
-			  UpnpActionRequest_get_ErrStr_cstr(ar_event),
-			  UpnpActionRequest_get_ActionName_cstr(ar_event),
-			  UpnpActionRequest_get_DevUDN_cstr(ar_event),
-			  UpnpActionRequest_get_ServiceID_cstr(ar_event));
-#ifdef LAYERVIOLATION
-		ar_event->ErrCode = UPNP_E_SUCCESS;
-#endif
+			  errCode, sock, errStr, actionName, devUDN, serviceID);
+		UpnpActionRequest_set_ErrCode(ar_event, UPNP_E_SUCCESS);
 	}
 
 	if (event_service->last_change) {   // See comment above.
@@ -438,8 +436,19 @@ static gboolean initialize_device(struct upnp_device_descriptor *device_def,
 	char *buf;
 
 	rc = UpnpInit(ip_address, port);
+	/* There have been situations reported in which UPNP had issues
+	 * initializing right after network came up. #129
+	 */
+	int retries_left = 60;
+	static const int kRetryTimeMs = 1000;
+	while (rc != UPNP_E_SUCCESS && retries_left--) {
+		usleep(kRetryTimeMs * 1000);
+		Log_error("upnp", "UpnpInit(ip=%s, port=%d) Error: %s (%d). Retrying... (%ds)",
+			  ip_address, port, UpnpGetErrorMessage(rc), rc, retries_left);
+		rc = UpnpInit(ip_address, port);
+	}
 	if (UPNP_E_SUCCESS != rc) {
-		Log_error("upnp", "UpnpInit(ip=%s, port=%d) Error: %s (%d)",
+		Log_error("upnp", "UpnpInit(ip=%s, port=%d) Error: %s (%d). Giving up.",
 			  ip_address, port, UpnpGetErrorMessage(rc), rc);
 		return FALSE;
 	}
@@ -456,16 +465,14 @@ static gboolean initialize_device(struct upnp_device_descriptor *device_def,
 	if (!webserver_register_callbacks())
 	  return FALSE;
 
-	rc = UpnpAddVirtualDir("/upnp"
-			      , NULL, NULL
-			       );
+	rc = UpnpAddVirtualDir("/upnp", NULL, NULL);
 	if (UPNP_E_SUCCESS != rc) {
 		Log_error("upnp", "UpnpAddVirtualDir() Error: %s (%d)",
 			  UpnpGetErrorMessage(rc), rc);
 		return FALSE;
 	}
 
-       	buf = upnp_create_device_desc(device_def);
+	buf = upnp_create_device_desc(device_def);
 	rc = UpnpRegisterRootDevice2(UPNPREG_BUF_DESC,
 				     buf, strlen(buf), 1,
 				     &event_handler, result_device,
@@ -511,13 +518,13 @@ struct upnp_device *upnp_device_init(struct upnp_device_descriptor *device_def,
 	ithread_mutex_init(&(result_device->device_mutex), NULL);
 
 	/* register icons in web server */
-        for (int i = 0; (icon_entry = device_def->icons[i]); i++) {
+	for (int i = 0; (icon_entry = device_def->icons[i]); i++) {
 		webserver_register_file(icon_entry->url, "image/png");
-        }
+	}
 
 	/* generate and register service schemas in web server */
-        for (int i = 0; (srv = device_def->services[i]); i++) {
-       		buf = upnp_get_scpd(srv);
+	for (int i = 0; (srv = device_def->services[i]); i++) {
+		buf = upnp_get_scpd(srv);
 		assert(buf != NULL);
 		webserver_register_buf(srv->scpd_url, buf, "text/xml");
 	}
@@ -536,7 +543,7 @@ void upnp_device_shutdown(struct upnp_device *device) {
 }
 
 struct service *find_service(struct upnp_device_descriptor *device_def,
-                             const char *service_id)
+			     const char *service_id)
 {
 	struct service *event_service;
 	int serviceNum = 0;
@@ -556,16 +563,16 @@ struct service *find_service(struct upnp_device_descriptor *device_def,
 /// ---- code to generate device descriptor
 
 static struct xmlelement *gen_specversion(struct xmldoc *doc,
-                                          int major, int minor)
+					  int major, int minor)
 {
-        struct xmlelement *top;
+	struct xmlelement *top;
 
-        top=xmlelement_new(doc, "specVersion");
+	top=xmlelement_new(doc, "specVersion");
 
-        add_value_element_int(doc, top, "major", major);
-        add_value_element_int(doc, top, "minor", minor);
+	add_value_element_int(doc, top, "major", major);
+	add_value_element_int(doc, top, "minor", minor);
 
-        return top;
+	return top;
 }
 
 
@@ -602,7 +609,7 @@ gen_desc_servicelist(struct upnp_device_descriptor *device_def,
 
 	top=xmlelement_new(doc, "serviceList");
 
-        for (i=0; (srv = device_def->services[i]); i++) {
+	for (i=0; (srv = device_def->services[i]); i++) {
 		parent = xmlelement_new(doc, "service");
 		add_value_element(doc, parent, "serviceType",srv->service_type);
 		add_value_element(doc, parent, "serviceId", srv->service_id);
@@ -610,7 +617,7 @@ gen_desc_servicelist(struct upnp_device_descriptor *device_def,
 		add_value_element(doc, parent, "controlURL", srv->control_url);
 		add_value_element(doc, parent, "eventSubURL", srv->event_url);
 		xmlelement_add_element(doc, top, parent);
-        }
+	}
 
 	return top;
 }
@@ -654,14 +661,14 @@ static struct xmldoc *generate_desc(struct upnp_device_descriptor *device_def)
 }
 
 char *upnp_create_device_desc(struct upnp_device_descriptor *device_def) {
-        char *result = NULL;
-        struct xmldoc *doc;
+	char *result = NULL;
+	struct xmldoc *doc;
 
-        doc = generate_desc(device_def);
+	doc = generate_desc(device_def);
 
-        if (doc != NULL) {
-                result = xmldoc_tostring(doc);
-                xmldoc_free(doc);
-        }
-        return result;
+	if (doc != NULL) {
+		result = xmldoc_tostring(doc);
+		xmldoc_free(doc);
+	}
+	return result;
 }

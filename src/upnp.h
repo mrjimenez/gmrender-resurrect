@@ -38,53 +38,53 @@ struct action {
 };
 
 typedef enum {
-        PARAM_DIR_IN,
-        PARAM_DIR_OUT,
+	PARAM_DIR_IN,
+	PARAM_DIR_OUT,
 } param_dir;
 
 struct argument {
-        const char *name;
-        param_dir direction;
-        int statevar;
+	const char *name;
+	param_dir direction;
+	int statevar;
 };
 
 typedef enum {
-        DATATYPE_STRING,
-        DATATYPE_BOOLEAN,
-        DATATYPE_I2,
-        DATATYPE_I4,
-        DATATYPE_UI2,
-        DATATYPE_UI4,
-        DATATYPE_UNKNOWN,
-        DATATYPE_COUNT
+	DATATYPE_STRING,
+	DATATYPE_BOOLEAN,
+	DATATYPE_I2,
+	DATATYPE_I4,
+	DATATYPE_UI2,
+	DATATYPE_UI4,
+	DATATYPE_UNKNOWN,
+	DATATYPE_COUNT
 } param_datatype;
 
 typedef enum {
-        SENDEVENT_NO,
-        SENDEVENT_YES
+	SENDEVENT_NO,
+	SENDEVENT_YES
 } param_event;
 
 struct param_range {
-        long long min;
-        long long max;
-        long long step;
+	long long min;
+	long long max;
+	long long step;
 };
 
 struct var_meta {
-        param_event     sendevents;
-        param_datatype  datatype;
-        const char      **allowed_values;
-        struct param_range      *allowed_range;
+	param_event     sendevents;
+	param_datatype  datatype;
+	const char      **allowed_values;
+	struct param_range      *allowed_range;
 	const char      *default_value;
 };
 
 
 struct icon {
-        int width;
-        int height;
-        int depth;
-        const char *url;
-        const char *mimetype;
+	int width;
+	int height;
+	int depth;
+	const char *url;
+	const char *mimetype;
 };
 
 struct service {
@@ -114,13 +114,8 @@ struct action_event {
 	struct upnp_device *device;
 };
 
-struct action *find_action(struct service *event_service,
-                           const char *action_name);
+struct action *find_action(struct service *event_service, const char *action_name);
 
 char *upnp_get_scpd(struct service *srv);
-
-#if UPNP_VERSION >= 10803
-#define UpnpAddVirtualDir(a) UpnpAddVirtualDir((a), NULL, NULL)
-#endif
 
 #endif /* _UPNP_H */

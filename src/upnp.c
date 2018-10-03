@@ -15,8 +15,8 @@
  * GNU Library General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with GMediaRender; if not, write to the Free Software 
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, 
+ * along with GMediaRender; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
  * MA 02110-1301, USA.
  *
  */
@@ -39,13 +39,13 @@
 #include "upnp.h"
 
 static const char *param_datatype_names[] = {
-        [DATATYPE_STRING] =     "string",
-        [DATATYPE_BOOLEAN] =    "boolean",
-        [DATATYPE_I2] =         "i2",
-        [DATATYPE_I4] =         "i4",
-        [DATATYPE_UI2] =        "ui2",
-        [DATATYPE_UI4] =        "ui4",
-        [DATATYPE_UNKNOWN] =    NULL
+	[DATATYPE_STRING] =     "string",
+	[DATATYPE_BOOLEAN] =    "boolean",
+	[DATATYPE_I2] =         "i2",
+	[DATATYPE_I4] =         "i4",
+	[DATATYPE_UI2] =        "ui2",
+	[DATATYPE_UI4] =        "ui4",
+	[DATATYPE_UNKNOWN] =    NULL
 };
 
 static struct xmlelement *gen_specversion(struct xmldoc *doc,
@@ -139,7 +139,7 @@ static struct xmlelement *gen_scpd_statevar(struct xmldoc *doc,
 		xmlelement_add_element(doc, top, parent);
 		for(i=0; (allowed_value=valuelist[i]); i++) {
 			add_value_element(doc,parent,"allowedValue", allowed_value);
-		} 
+		}
 	}
 	if (range) {
 		parent=xmlelement_new(doc, "allowedValueRange");
@@ -189,19 +189,17 @@ static struct xmldoc *generate_scpd(struct service *srv)
 
 	child=gen_scpd_servicestatetable(doc,srv);
 	xmlelement_add_element(doc, root, child);
-	
+
 	return doc;
 }
 
-struct action *find_action(struct service *event_service,
-			   const char *action_name)
+struct action *find_action(struct service *event_service, const char *action_name)
 {
 	struct action *event_action;
 	int actionNum = 0;
 	if (event_service == NULL)
 		return NULL;
-	while (event_action =
-	       &(event_service->actions[actionNum]),
+	while (event_action = &(event_service->actions[actionNum]),
 	       event_action->action_name != NULL) {
 		if (strcmp(event_action->action_name, action_name) == 0)
 			return event_action;
@@ -218,7 +216,7 @@ char *upnp_get_scpd(struct service *srv)
 	doc = generate_scpd(srv);
 	if (doc != NULL)
 	{
-       		result = xmldoc_tostring(doc);
+		result = xmldoc_tostring(doc);
 		xmldoc_free(doc);
 	}
 	return result;

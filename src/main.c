@@ -40,6 +40,7 @@
 # error "To have gmrender any useful, you need to have libupnp installed."
 #endif
 
+#include <upnp/upnp.h>
 #include <upnp/ithread.h>
 
 // For version strings of upnp and gstreamer
@@ -126,7 +127,7 @@ static GOptionEntry option_entries[] = {
 static void do_show_version(void)
 {
 	puts( PACKAGE_STRING "; " GM_COMPILE_VERSION "\n"
-        	"This is free software. "
+		"This is free software. "
 		"You may redistribute copies of it under the terms of\n"
 		"the GNU General Public License "
 		"<http://www.gnu.org/licenses/gpl.html>.\n"

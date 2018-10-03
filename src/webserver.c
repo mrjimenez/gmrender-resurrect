@@ -92,7 +92,7 @@ int webserver_register_file(const char *path, const char *content_type)
 	int rc;
 
 	snprintf(local_fname, sizeof(local_fname), "%s%s", PKG_DATADIR,
-	         strrchr(path, '/'));
+		 strrchr(path, '/'));
 
 	Log_info("webserver", "Provide %s (%s) from %s", path, content_type,
 		 local_fname);
@@ -152,10 +152,11 @@ static int webserver_get_info(const char *filename, UpnpFileInfo *info)
 			UpnpFileInfo_set_LastModified(info, 0);
 			UpnpFileInfo_set_IsDirectory(info, 0);
 			UpnpFileInfo_set_IsReadable(info, 1);
-			UpnpFileInfo_set_ContentType(info,
-			    ixmlCloneDOMString(virtfile->content_type));
+			const char *contentType =
+				ixmlCloneDOMString(virtfile->content_type);
+			UpnpFileInfo_set_ContentType(info, contentType);
 			Log_info("webserver", "Access %s (%s) len=%zd",
-				 filename, UpnpFileInfo_get_ContentType(info), virtfile->len);
+				 filename, contentType, virtfile->len);
 			return 0;
 		}
 		virtfile = virtfile->next;
